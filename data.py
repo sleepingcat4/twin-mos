@@ -1,28 +1,36 @@
 import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset
+from tqdm import tqdm
 
 class SingMOSPairs(Dataset):
     def __init__(self, split="train", segment_length=16000):
-        # Load HF dataset and convert to numpy arrays in memory
-        raw = load_dataset("TangRain/SingMOS", split=split)
+        print("Loading SingMOS dataset...")
+        # Will use cached data if available; downloads only if missing
+        raw = load_dataset(
+            "TangRain/SingMOS",
+            split=split,
+            download_mode="reuse_dataset_if_exists"
+        )
         raw = raw.with_format("numpy")
 
         self.segment_length = segment_length
         self.audio = []
         self.mos = []
 
-        for sample in raw:
+        print(f"Preloading {len(raw)} audio samples into memory...")
+        for sample in tqdm(raw, desc="Loading audio"):
             self.audio.append(torch.tensor(sample["audio"]["array"], dtype=torch.float32))
-            self.mos.append(torch.tensor(sample["mos"] / 5.0, dtype=torch.float32))  # normalize 0-1
+            self.mos.append(torch.tensor(sample["mos"] / 5.0, dtype=torch.float32))  # normalize 0–1
 
         self.n = len(self.audio)
+        print("Preloading complete.")
 
     def __len__(self):
         return self.n
 
     def _process_audio(self, audio):
-        audio = audio.unsqueeze(0)  # add channel dim
+        audio = audio.unsqueeze(0)  # add channel dimension [1, T]
 
         if audio.shape[-1] >= self.segment_length:
             start = torch.randint(0, audio.shape[-1] - self.segment_length + 1, (1,)).item()
