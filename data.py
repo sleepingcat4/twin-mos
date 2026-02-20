@@ -2,23 +2,30 @@ import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset
 
-
 class SingMOSPairs(Dataset):
     def __init__(self, split="train", segment_length=16000):
-        self.dataset = load_dataset("TangRain/SingMOS", split=split)
-        self.n = len(self.dataset)
+        # Load HF dataset and convert to numpy arrays in memory
+        raw = load_dataset("TangRain/SingMOS", split=split)
+        raw = raw.with_format("numpy")
+
         self.segment_length = segment_length
+        self.audio = []
+        self.mos = []
+
+        for sample in raw:
+            self.audio.append(torch.tensor(sample["audio"]["array"], dtype=torch.float32))
+            self.mos.append(torch.tensor(sample["mos"] / 5.0, dtype=torch.float32))  # normalize 0-1
+
+        self.n = len(self.audio)
 
     def __len__(self):
         return self.n
 
-    def _process_audio(self, audio_array):
-        audio = torch.tensor(audio_array, dtype=torch.float32).unsqueeze(0)
+    def _process_audio(self, audio):
+        audio = audio.unsqueeze(0)  # add channel dim
 
         if audio.shape[-1] >= self.segment_length:
-            start = torch.randint(
-                0, audio.shape[-1] - self.segment_length + 1, (1,)
-            ).item()
+            start = torch.randint(0, audio.shape[-1] - self.segment_length + 1, (1,)).item()
             audio = audio[:, start:start + self.segment_length]
         else:
             pad = self.segment_length - audio.shape[-1]
@@ -27,15 +34,13 @@ class SingMOSPairs(Dataset):
         return audio
 
     def __getitem__(self, idx):
+        # Random pairing
         idx2 = torch.randint(0, self.n, (1,)).item()
 
-        sample1 = self.dataset[idx]
-        sample2 = self.dataset[idx2]
+        audio1 = self._process_audio(self.audio[idx])
+        audio2 = self._process_audio(self.audio[idx2])
 
-        audio1 = self._process_audio(sample1["audio"]["array"])
-        audio2 = self._process_audio(sample2["audio"]["array"])
-
-        mos1 = torch.tensor(sample1["mos"] / 5.0, dtype=torch.float32)
-        mos2 = torch.tensor(sample2["mos"] / 5.0, dtype=torch.float32)
+        mos1 = self.mos[idx]
+        mos2 = self.mos[idx2]
 
         return audio1, mos1, audio2, mos2
